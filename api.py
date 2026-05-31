@@ -5,24 +5,25 @@ Deploy lên Render hoặc Railway, sau đó gọi từ Kotlin app.
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 import joblib
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
     ZoneInfo = None
 
-
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 
-DATA_PATH       = BASE_DIR / "data" / "processed" / "weather_model_data.csv.gz"
-DAILY_DATA_PATH = BASE_DIR / "data" / "processed" / "daily_weather.csv.gz"
+DATA_PATH           = BASE_DIR / "data" / "processed" / "weather_model_data.csv.gz"
+DAILY_DATA_PATH     = BASE_DIR / "data" / "processed" / "daily_weather.csv.gz"
 MAX_TEMP_MODEL_PATH = BASE_DIR / "models" / "max_temp_model.pkl"
 MIN_TEMP_MODEL_PATH = BASE_DIR / "models" / "min_temp_model.pkl"
 RAIN_MODEL_PATH     = BASE_DIR / "models" / "rain_model.pkl"
@@ -37,7 +38,6 @@ WEATHER_COLS = [
     "wind", "rain", "humidi", "cloud", "pressure", "mean_sea_level_pressure",
 ]
 
-
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Weather Forecast API",
@@ -45,7 +45,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Cho phép app Android gọi vào (CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,23 +52,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ── Load data & models (1 lần khi khởi động) ─────────────────────────────────
+# ── Load data & models ────────────────────────────────────────────────────────
 print("Loading data and models...")
-model_df    = pd.read_csv(DATA_PATH);  model_df["date"]    = pd.to_datetime(model_df["date"])
-daily_df    = pd.read_csv(DAILY_DATA_PATH); daily_df["date"] = pd.to_datetime(daily_df["date"])
-max_model   = joblib.load(MAX_TEMP_MODEL_PATH)
-min_model   = joblib.load(MIN_TEMP_MODEL_PATH)
-rain_model  = joblib.load(RAIN_MODEL_PATH)
+model_df  = pd.read_csv(DATA_PATH);       model_df["date"]  = pd.to_datetime(model_df["date"])
+daily_df  = pd.read_csv(DAILY_DATA_PATH); daily_df["date"]  = pd.to_datetime(daily_df["date"])
+max_model = joblib.load(MAX_TEMP_MODEL_PATH)
+min_model = joblib.load(MIN_TEMP_MODEL_PATH)
+rain_model= joblib.load(RAIN_MODEL_PATH)
 print("Ready!")
 
+# ── Request body cho predict với input thủ công ───────────────────────────────
+class TodayInput(BaseModel):
+    province: str
+    max_temp: float
+    min_temp: float
+    rain: float
+    humidity: float
+    wind: float
+    cloud: float
+    pressure: float
+    mean_sea_level_pressure: float
 
-# ── Helper functions (giữ nguyên logic từ app.py gốc) ────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 def get_vietnam_now():
     if ZoneInfo is not None:
         return datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
     return datetime.now()
-
 
 def get_seasonal_reference_row(df, province, current_date):
     province_df = df[df["province"] == province].copy()
@@ -92,20 +100,18 @@ def get_seasonal_reference_row(df, province, current_date):
 
     return province_df.iloc[-1].copy()
 
-
 def update_time_features(row, date_value):
     date_value = pd.to_datetime(date_value)
-    row["date"]       = date_value
-    row["year"]       = date_value.year
-    row["month"]      = date_value.month
-    row["day"]        = date_value.day
-    row["dayofyear"]  = date_value.dayofyear
-    row["month_sin"]  = np.sin(2 * np.pi * row["month"] / 12)
-    row["month_cos"]  = np.cos(2 * np.pi * row["month"] / 12)
+    row["date"]          = date_value
+    row["year"]          = date_value.year
+    row["month"]         = date_value.month
+    row["day"]           = date_value.day
+    row["dayofyear"]     = date_value.dayofyear
+    row["month_sin"]     = np.sin(2 * np.pi * row["month"] / 12)
+    row["month_cos"]     = np.cos(2 * np.pi * row["month"] / 12)
     row["dayofyear_sin"] = np.sin(2 * np.pi * row["dayofyear"] / 365)
     row["dayofyear_cos"] = np.cos(2 * np.pi * row["dayofyear"] / 365)
     return row
-
 
 def update_lag_features_for_next_day(row):
     row = row.copy()
@@ -122,16 +128,30 @@ def update_lag_features_for_next_day(row):
         if f"{col}_lag7"  in row.index: row[f"{col}_lag7"]  = old_lag3
         if f"{col}_lag14" in row.index: row[f"{col}_lag14"] = old_lag7
 
-        rolling3  = [row.get(f"{col}_lag1", np.nan), row.get(f"{col}_lag2", np.nan), row.get(f"{col}_lag3", np.nan)]
-        rolling7  = rolling3 + [row.get(f"{col}_lag7", np.nan)]
-        rolling14 = rolling7 + [row.get(f"{col}_lag14", np.nan)]
+        r3  = [row.get(f"{col}_lag1", np.nan), row.get(f"{col}_lag2", np.nan), row.get(f"{col}_lag3", np.nan)]
+        r7  = r3 + [row.get(f"{col}_lag7", np.nan)]
+        r14 = r7 + [row.get(f"{col}_lag14", np.nan)]
 
-        if f"{col}_rolling3"  in row.index: row[f"{col}_rolling3"]  = np.nanmean(rolling3)
-        if f"{col}_rolling7"  in row.index: row[f"{col}_rolling7"]  = np.nanmean(rolling7)
-        if f"{col}_rolling14" in row.index: row[f"{col}_rolling14"] = np.nanmean(rolling14)
-
+        if f"{col}_rolling3"  in row.index: row[f"{col}_rolling3"]  = np.nanmean(r3)
+        if f"{col}_rolling7"  in row.index: row[f"{col}_rolling7"]  = np.nanmean(r7)
+        if f"{col}_rolling14" in row.index: row[f"{col}_rolling14"] = np.nanmean(r14)
     return row
 
+def synchronize_lag_rolling_features(row):
+    row = row.copy()
+    for col in WEATHER_COLS:
+        if col not in row.index:
+            continue
+        current_value = row[col]
+        for lag in [1, 2, 3, 7, 14]:
+            lag_col = f"{col}_lag{lag}"
+            if lag_col in row.index:
+                row[lag_col] = current_value
+        for window in [3, 7, 14]:
+            rolling_col = f"{col}_rolling{window}"
+            if rolling_col in row.index:
+                row[rolling_col] = current_value
+    return row
 
 def build_input_from_row(row, model):
     X_input = row.drop(labels=DROP_COLS, errors="ignore").to_frame().T
@@ -142,15 +162,13 @@ def build_input_from_row(row, model):
         X_input = X_input[list(model.feature_names_in_)]
     return X_input
 
-
 def predict_one_day(row, max_m, min_m, rain_m):
-    predicted_max  = max_m.predict(build_input_from_row(row, max_m))[0]
-    predicted_min  = min_m.predict(build_input_from_row(row, min_m))[0]
-    rain_pred      = rain_m.predict(build_input_from_row(row, rain_m))[0]
-    rain_prob      = rain_m.predict_proba(build_input_from_row(row, rain_m))[0][1] \
-                     if hasattr(rain_m, "predict_proba") else np.nan
-    return predicted_max, predicted_min, rain_pred, rain_prob
-
+    pred_max  = max_m.predict(build_input_from_row(row, max_m))[0]
+    pred_min  = min_m.predict(build_input_from_row(row, min_m))[0]
+    rain_pred = rain_m.predict(build_input_from_row(row, rain_m))[0]
+    rain_prob = rain_m.predict_proba(build_input_from_row(row, rain_m))[0][1] \
+                if hasattr(rain_m, "predict_proba") else np.nan
+    return pred_max, pred_min, rain_pred, rain_prob
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -161,53 +179,87 @@ def root():
 
 @app.get("/provinces")
 def get_provinces():
-    """Lấy danh sách tỉnh thành để hiển thị dropdown trong app."""
-    provinces = sorted(model_df["province"].unique().tolist())
-    return {"provinces": provinces}
+    """Danh sách tỉnh thành."""
+    return {"provinces": sorted(model_df["province"].unique().tolist())}
 
 
-@app.get("/predict/tomorrow")
-def predict_tomorrow(province: str):
+@app.get("/default-input")
+def get_default_input(province: str):
     """
-    Dự báo ngày mai cho 1 tỉnh.
-    Ví dụ: GET /predict/tomorrow?province=Ha Noi
+    Lấy giá trị mặc định của 8 input hôm nay theo mùa cho 1 tỉnh.
+    App dùng để điền sẵn vào form trước khi người dùng chỉnh.
     """
     if province not in model_df["province"].values:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy tỉnh: {province}")
 
+    today   = get_vietnam_now().date()
+    ref_row = get_seasonal_reference_row(model_df, province, today)
+
+    return {
+        "province":                  province,
+        "max_temp":                  round(float(ref_row["max"]), 1),
+        "min_temp":                  round(float(ref_row["min"]), 1),
+        "rain":                      round(float(ref_row["rain"]), 1),
+        "humidity":                  round(float(ref_row["humidi"]), 1),
+        "wind":                      round(float(ref_row["wind"]), 1),
+        "cloud":                     round(float(ref_row["cloud"]), 1),
+        "pressure":                  round(float(ref_row["pressure"]), 1),
+        "mean_sea_level_pressure":   round(float(ref_row["mean_sea_level_pressure"]), 1),
+    }
+
+
+@app.post("/predict/tomorrow")
+def predict_tomorrow(body: TodayInput):
+    """
+    Dự báo ngày mai với dữ liệu hôm nay do người dùng nhập.
+    POST body JSON gồm 8 trường thời tiết hôm nay.
+    """
+    if body.province not in model_df["province"].values:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy tỉnh: {body.province}")
+
     today    = get_vietnam_now().date()
     tomorrow = today + timedelta(days=1)
 
-    ref_row = get_seasonal_reference_row(model_df, province, today)
+    ref_row = get_seasonal_reference_row(model_df, body.province, today)
     ref_row = update_time_features(ref_row, tomorrow)
+
+    # Ghi đè bằng input thực của người dùng
+    ref_row["max"]                    = body.max_temp
+    ref_row["min"]                    = body.min_temp
+    ref_row["rain"]                   = body.rain
+    ref_row["humidi"]                 = body.humidity
+    ref_row["wind"]                   = body.wind
+    ref_row["cloud"]                  = body.cloud
+    ref_row["pressure"]               = body.pressure
+    ref_row["mean_sea_level_pressure"]= body.mean_sea_level_pressure
+    ref_row["temp_mean"]              = (body.max_temp + body.min_temp) / 2
+    ref_row["temp_range"]             = body.max_temp - body.min_temp
+
+    ref_row = synchronize_lag_rolling_features(ref_row)
 
     pred_max, pred_min, rain_pred, rain_prob = predict_one_day(
         ref_row, max_model, min_model, rain_model
     )
 
     return {
-        "province":        province,
-        "date":            str(tomorrow),
-        "max_temp":        round(float(pred_max), 1),
-        "min_temp":        round(float(pred_min), 1),
-        "will_rain":       bool(rain_pred),
+        "province":         body.province,
+        "date":             str(tomorrow),
+        "max_temp":         round(float(pred_max), 1),
+        "min_temp":         round(float(pred_min), 1),
+        "will_rain":        bool(rain_pred),
         "rain_probability": round(float(rain_prob) * 100, 1) if not np.isnan(rain_prob) else None,
     }
 
 
 @app.get("/predict/7days")
 def predict_7_days(province: str):
-    """
-    Dự báo 7 ngày cho 1 tỉnh.
-    Ví dụ: GET /predict/7days?province=Ha Noi
-    """
+    """Dự báo 7 ngày cho 1 tỉnh."""
     if province not in model_df["province"].values:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy tỉnh: {province}")
 
-    today = get_vietnam_now().date()
+    today       = get_vietnam_now().date()
     current_row = get_seasonal_reference_row(model_df, province, today)
-
-    results = []
+    results     = []
 
     for i in range(1, 8):
         forecast_date = today + timedelta(days=i)
@@ -218,20 +270,16 @@ def predict_7_days(province: str):
         )
 
         results.append({
-            "date":            str(forecast_date),
-            "max_temp":        round(float(pred_max), 1),
-            "min_temp":        round(float(pred_min), 1),
-            "will_rain":       bool(rain_pred),
+            "date":             str(forecast_date),
+            "max_temp":         round(float(pred_max), 1),
+            "min_temp":         round(float(pred_min), 1),
+            "will_rain":        bool(rain_pred),
             "rain_probability": round(float(rain_prob) * 100, 1) if not np.isnan(rain_prob) else None,
         })
 
-        # Cập nhật lag cho ngày tiếp theo
-        current_row["max"]   = pred_max
-        current_row["min"]   = pred_min
-        current_row["rain"]  = 1.0 if rain_pred else 0.0
+        current_row["max"]  = pred_max
+        current_row["min"]  = pred_min
+        current_row["rain"] = 1.0 if rain_pred else 0.0
         current_row = update_lag_features_for_next_day(current_row)
 
-    return {
-        "province": province,
-        "forecast": results,
-    }
+    return {"province": province, "forecast": results}
