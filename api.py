@@ -61,7 +61,7 @@ min_model = joblib.load(MIN_TEMP_MODEL_PATH)
 rain_model= joblib.load(RAIN_MODEL_PATH)
 print("Ready!")
 
-#  Request body cho predict với input thủ công ─
+#  Request body cho predict với input thủ công 
 class TodayInput(BaseModel):
     province: str
     max_temp: float
@@ -73,7 +73,7 @@ class TodayInput(BaseModel):
     pressure: float
     mean_sea_level_pressure: float
 
-#  Helpers ─
+#  Helpers 
 def get_vietnam_now():
     if ZoneInfo is not None:
         return datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
@@ -170,7 +170,7 @@ def predict_one_day(row, max_m, min_m, rain_m):
                 if hasattr(rain_m, "predict_proba") else np.nan
     return pred_max, pred_min, rain_pred, rain_prob
 
-#  Endpoints ─
+#  Endpoints 
 
 @app.get("/")
 def root():
