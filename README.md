@@ -178,50 +178,6 @@ weather-forecast-ml-app/
 └── reports/
 ```
 
-## How to Run the Streamlit App
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Run the app:
-
-```bash
-streamlit run app.py
-```
-
-The app will open at:
-
-```text
-http://localhost:8501
-```
-
-## How to Run the API
-
-Run the FastAPI server:
-
-```bash
-uvicorn api:app --reload
-```
-
-API documentation will be available at:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-## APK Release
-
-The Android APK demo is available in GitHub Releases.
-
-```text
-https://github.com/your-username/weather-forecast-ml-app/releases/latest
-```
-
-The APK allows users to test the weather forecasting application on an Android device.
-
 ## Key Learning Outcomes
 
 Through this project, I practiced:
