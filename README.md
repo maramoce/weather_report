@@ -9,13 +9,13 @@ This project predicts next-day maximum temperature, minimum temperature, and rai
 APK download:
 
 ```text
-https://github.com/your-username/weather-forecast-ml-app/releases/latest
+https://github.com/maramoce/weather_report/releases/tag/v1.0.0
 ```
 
 Repository:
 
 ```text
-https://github.com/your-username/weather-forecast-ml-app
+https://github.com/maramoce/weather_report
 ```
 
 ## Main Features
